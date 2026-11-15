@@ -1,6 +1,4 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { QRCodeSVG } from 'qrcode.react';
-import confetti from 'canvas-confetti';
 import {
   ChevronLeft,
   ChevronRight,
@@ -18,7 +16,8 @@ import {
   Share2,
   Sparkles,
   HelpCircle,
-  RotateCcw
+  RotateCcw,
+  List
 } from 'lucide-react';
 import slidesData from './slidesData.json';
 
@@ -35,6 +34,7 @@ interface Slide {
 export default function App() {
   const slides: Slide[] = slidesData;
   const [currentIndex, setCurrentIndex] = useState<number>(0);
+  const [viewMode, setViewMode] = useState<'slide' | 'scroll'>('slide');
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [showThumbnails, setShowThumbnails] = useState<boolean>(false);
   const [showQrModal, setShowQrModal] = useState<boolean>(false);
@@ -51,7 +51,6 @@ export default function App() {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const qrSvgRef = useRef<SVGSVGElement | null>(null);
 
   // Initialize live URL for QR code
   useEffect(() => {
@@ -64,36 +63,25 @@ export default function App() {
 
   // Preload neighboring slides for instant switching
   useEffect(() => {
+    if (viewMode !== 'slide') return;
     const nextIdx = (currentIndex + 1) % slides.length;
     const prevIdx = (currentIndex - 1 + slides.length) % slides.length;
     const nextImg = new Image();
     nextImg.src = slides[nextIdx].image;
     const prevImg = new Image();
     prevImg.src = slides[prevIdx].image;
-  }, [currentIndex, slides]);
-
-  // Confetti on thank-you slide (Slide 17)
-  useEffect(() => {
-    if (currentIndex === 16) {
-      try {
-        confetti({
-          particleCount: 90,
-          spread: 80,
-          origin: { y: 0.6 },
-          colors: ['#52b788', '#74c69d', '#95d5b2', '#b7e4c7', '#d8f3dc']
-        });
-      } catch {
-        // ignore
-      }
-    }
-  }, [currentIndex]);
+  }, [currentIndex, slides, viewMode]);
 
   const goToSlide = useCallback((index: number) => {
     if (index >= 0 && index < slides.length) {
       setImageError(false);
       setCurrentIndex(index);
+      if (viewMode === 'scroll') {
+        const el = document.getElementById(`slide-anchor-${index + 1}`);
+        if (el) el.scrollIntoView({ behavior: 'smooth' });
+      }
     }
-  }, [slides.length]);
+  }, [slides.length, viewMode]);
 
   const nextSlide = useCallback(() => {
     setImageError(false);
@@ -107,7 +95,7 @@ export default function App() {
 
   // Autoplay effect
   useEffect(() => {
-    if (!isAutoPlay) return;
+    if (!isAutoPlay || viewMode !== 'slide') return;
     const interval = setInterval(() => {
       setCurrentIndex((prev) => {
         if (prev >= slides.length - 1) {
@@ -118,7 +106,7 @@ export default function App() {
       });
     }, 6000);
     return () => clearInterval(interval);
-  }, [isAutoPlay, slides.length]);
+  }, [isAutoPlay, slides.length, viewMode]);
 
   // Keyboard navigation
   useEffect(() => {
@@ -178,6 +166,11 @@ export default function App() {
           e.preventDefault();
           setIsAutoPlay((prev) => !prev);
           break;
+        case 'm':
+        case 'M':
+          e.preventDefault();
+          setViewMode((prev) => (prev === 'slide' ? 'scroll' : 'slide'));
+          break;
         case '?':
           e.preventDefault();
           setShowHelp(true);
@@ -187,26 +180,34 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [nextSlide, prevSlide, goToSlide, slides.length, showQrModal, showNotes, showThumbnails, showHelp]);
+  }, [nextSlide, prevSlide, goToSlide, slides.length, showQrModal, showNotes, showThumbnails, showHelp, viewMode]);
 
-  // Fullscreen toggle with iOS fallback
+  // Fullscreen toggle with fallback
   const toggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-      if (document.documentElement.requestFullscreen) {
-        document.documentElement.requestFullscreen().catch(() => {});
-        setIsFullscreen(true);
+    try {
+      if (!document.fullscreenElement) {
+        if (document.documentElement.requestFullscreen) {
+          document.documentElement.requestFullscreen().catch(() => {});
+          setIsFullscreen(true);
+        }
+      } else {
+        if (document.exitFullscreen) {
+          document.exitFullscreen().catch(() => {});
+          setIsFullscreen(false);
+        }
       }
-    } else {
-      if (document.exitFullscreen) {
-        document.exitFullscreen().catch(() => {});
-        setIsFullscreen(false);
-      }
+    } catch {
+      // ignore
     }
   };
 
   useEffect(() => {
     const onFsChange = () => {
-      setIsFullscreen(Boolean(document.fullscreenElement));
+      try {
+        setIsFullscreen(Boolean(document.fullscreenElement));
+      } catch {
+        // ignore
+      }
     };
     document.addEventListener('fullscreenchange', onFsChange);
     return () => document.removeEventListener('fullscreenchange', onFsChange);
@@ -220,7 +221,7 @@ export default function App() {
       if (isFullscreen) {
         setIsControlsVisible(false);
       }
-    }, 4000);
+    }, 4500);
   };
 
   // Touch handlers for mobile swipe
@@ -231,13 +232,12 @@ export default function App() {
   };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
-    if (touchStartX === null || touchStartY === null) return;
+    if (touchStartX === null || touchStartY === null || viewMode === 'scroll') return;
     const touchEndX = e.changedTouches[0].clientX;
     const touchEndY = e.changedTouches[0].clientY;
     const diffX = touchStartX - touchEndX;
     const diffY = touchStartY - touchEndY;
 
-    // Horizontal swipe if swipe distance in X is greater than Y
     if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 40) {
       if (diffX > 0) {
         nextSlide();
@@ -251,33 +251,12 @@ export default function App() {
 
   const handleCopyLink = () => {
     const urlToCopy = customQrUrl || currentUrl;
-    navigator.clipboard.writeText(urlToCopy).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  };
-
-  const downloadQrCodePng = () => {
-    const svg = document.getElementById('qr-code-svg');
-    if (!svg) return;
-    const svgData = new XMLSerializer().serializeToString(svg);
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    const img = new Image();
-    img.onload = () => {
-      canvas.width = 600;
-      canvas.height = 600;
-      if (ctx) {
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, 600, 600);
-        ctx.drawImage(img, 40, 40, 520, 520);
-        const a = document.createElement('a');
-        a.download = 'QR-Te-Bao-Thuc-Vat-Nhom-1.png';
-        a.href = canvas.toDataURL('image/png');
-        a.click();
-      }
-    };
-    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(urlToCopy).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }).catch(() => {});
+    }
   };
 
   const currentSlide = slides[currentIndex];
@@ -291,14 +270,14 @@ export default function App() {
       className="relative w-full h-[100dvh] min-h-[100dvh] bg-[#07130e] text-slate-100 flex flex-col justify-between overflow-hidden select-none font-sans"
     >
       {/* BACKGROUND GLOW */}
-      <div className="absolute inset-0 pointer-events-none opacity-25">
+      <div className="absolute inset-0 pointer-events-none opacity-20">
         <div className="absolute top-[-10%] left-[20%] w-[450px] h-[450px] rounded-full bg-[#2d6a4f] blur-[130px]" />
         <div className="absolute bottom-[-10%] right-[10%] w-[550px] h-[550px] rounded-full bg-[#1b4332] blur-[150px]" />
       </div>
 
       {/* TOP NAVIGATION BAR */}
       <header
-        className={`relative z-20 flex-shrink-0 flex items-center justify-between px-3 md:px-6 py-2 bg-[#091a13]/90 backdrop-blur-md border-b border-[#2d6a4f]/40 transition-all duration-300 ${
+        className={`relative z-20 flex-shrink-0 flex items-center justify-between px-3 md:px-6 py-2 bg-[#091a13]/95 backdrop-blur-md border-b border-[#2d6a4f]/40 transition-all duration-300 ${
           !isControlsVisible && isFullscreen ? 'opacity-0 -translate-y-full pointer-events-none' : 'opacity-100 translate-y-0'
         }`}
       >
@@ -318,11 +297,29 @@ export default function App() {
           </div>
         </div>
 
-        {/* Center: Slide counter */}
-        <div className="flex items-center gap-1 bg-[#0e2a1e]/90 border border-emerald-600/30 px-2.5 py-1 rounded-full text-xs font-medium text-emerald-300">
-          <span className="text-emerald-400 font-bold">{String(currentIndex + 1).padStart(2, '0')}</span>
-          <span className="text-emerald-600/80">/</span>
-          <span className="text-slate-400">{String(slides.length).padStart(2, '0')}</span>
+        {/* Center: Slide counter / Mode Switcher */}
+        <div className="flex items-center gap-2">
+          {viewMode === 'slide' ? (
+            <div className="flex items-center gap-1 bg-[#0e2a1e]/90 border border-emerald-600/30 px-2.5 py-1 rounded-full text-xs font-medium text-emerald-300">
+              <span className="text-emerald-400 font-bold">{String(currentIndex + 1).padStart(2, '0')}</span>
+              <span className="text-emerald-600/80">/</span>
+              <span className="text-slate-400">{String(slides.length).padStart(2, '0')}</span>
+            </div>
+          ) : (
+            <span className="text-[11px] text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/40">
+              Chế độ cuộn đọc (18 trang)
+            </span>
+          )}
+
+          {/* Mode Toggle Button: Slide vs Scroll */}
+          <button
+            onClick={() => setViewMode((prev) => (prev === 'slide' ? 'scroll' : 'slide'))}
+            title={viewMode === 'slide' ? 'Đổi sang cuộn đọc danh sách (M)' : 'Đổi sang trình chiếu từng slide (M)'}
+            className="flex items-center gap-1 px-2.5 py-1 text-xs rounded-lg bg-emerald-900/40 hover:bg-emerald-800/60 text-emerald-300 border border-emerald-700/40 transition-colors"
+          >
+            {viewMode === 'slide' ? <List className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+            <span className="hidden sm:inline">{viewMode === 'slide' ? 'Cuộn đọc' : 'Trình chiếu'}</span>
+          </button>
         </div>
 
         {/* Right: Action Buttons */}
@@ -371,15 +368,17 @@ export default function App() {
           </button>
 
           {/* Auto play button */}
-          <button
-            onClick={() => setIsAutoPlay((prev) => !prev)}
-            title={isAutoPlay ? 'Tạm dừng tự động chạy (A)' : 'Tự động chạy bài thuyết trình (A)'}
-            className={`hidden sm:flex p-1.5 rounded-lg text-emerald-300 hover:bg-emerald-900/40 transition-colors ${
-              isAutoPlay ? 'bg-emerald-500 text-black' : ''
-            }`}
-          >
-            {isAutoPlay ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-          </button>
+          {viewMode === 'slide' && (
+            <button
+              onClick={() => setIsAutoPlay((prev) => !prev)}
+              title={isAutoPlay ? 'Tạm dừng tự động chạy (A)' : 'Tự động chạy bài thuyết trình (A)'}
+              className={`hidden sm:flex p-1.5 rounded-lg text-emerald-300 hover:bg-emerald-900/40 transition-colors ${
+                isAutoPlay ? 'bg-emerald-500 text-black' : ''
+              }`}
+            >
+              {isAutoPlay ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+            </button>
+          )}
 
           {/* Fullscreen Button */}
           <button
@@ -401,132 +400,165 @@ export default function App() {
         </div>
       </header>
 
-      {/* MAIN SLIDE VIEW AREA - BULLETPROOF SCALING */}
-      <main className="relative flex-1 min-h-0 w-full flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-hidden">
-        <div className="relative w-full h-full max-w-[1920px] flex items-center justify-center">
-          {/* Left Click Area for Prev Slide */}
-          <div
-            onClick={prevSlide}
-            title="Slide trước (←)"
-            className="group absolute left-0 top-0 bottom-0 w-[20%] cursor-pointer flex items-center justify-start pl-2 sm:pl-4 transition-all duration-200 z-10"
-          >
-            <div className="p-2 sm:p-3 rounded-full bg-black/60 backdrop-blur-md text-emerald-300 border border-emerald-500/30 opacity-0 group-hover:opacity-100 transition-opacity shadow-lg">
-              <ChevronLeft className="w-5 h-5 sm:w-6 sm:h-6" />
+      {/* MAIN CONTENT AREA */}
+      {viewMode === 'slide' ? (
+        /* SLIDE PRESENTATION VIEW */
+        <main className="relative flex-1 min-h-0 w-full flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-hidden">
+          <div className="relative w-full h-full max-w-[1920px] flex items-center justify-center">
+            {/* Left Click Area for Prev Slide */}
+            <div
+              onClick={prevSlide}
+              title="Slide trước (←)"
+              className="group absolute left-0 top-0 bottom-0 w-[20%] cursor-pointer flex items-center justify-start pl-2 sm:pl-4 transition-all duration-200 z-10"
+            >
+              <div className="p-2 sm:p-3 rounded-full bg-black/60 backdrop-blur-md text-emerald-300 border border-emerald-500/30 opacity-0 group-hover:opacity-100 transition-opacity shadow-lg">
+                <ChevronLeft className="w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
+            </div>
+
+            {/* Slide Image with Native Aspect Ratio */}
+            {!imageError ? (
+              <img
+                key={currentSlide.id}
+                src={currentSlide.image}
+                alt={currentSlide.title}
+                onError={() => setImageError(true)}
+                className="max-w-full max-h-full w-auto h-auto object-contain rounded-lg sm:rounded-xl md:rounded-2xl shadow-2xl border border-emerald-600/30 select-none pointer-events-none transition-opacity duration-200"
+                style={{ display: 'block' }}
+                loading="eager"
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center p-8 bg-black/50 border border-emerald-700/50 rounded-2xl text-center max-w-sm">
+                <p className="text-sm text-red-300 mb-3">Không thể tải slide #{currentSlide.id}</p>
+                <button
+                  onClick={() => {
+                    setImageError(false);
+                    goToSlide(currentIndex);
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  <span>Thử tải lại</span>
+                </button>
+              </div>
+            )}
+
+            {/* Right Click Area for Next Slide */}
+            <div
+              onClick={nextSlide}
+              title="Slide tiếp (→ hoặc Space)"
+              className="group absolute right-0 top-0 bottom-0 w-[20%] cursor-pointer flex items-center justify-end pr-2 sm:pr-4 transition-all duration-200 z-10"
+            >
+              <div className="p-2 sm:p-3 rounded-full bg-black/60 backdrop-blur-md text-emerald-300 border border-emerald-500/30 opacity-0 group-hover:opacity-100 transition-opacity shadow-lg">
+                <ChevronRight className="w-5 h-5 sm:w-6 sm:h-6" />
+              </div>
             </div>
           </div>
-
-          {/* Slide Image with Native 16:9 Aspect Ratio Preservation */}
-          {!imageError ? (
-            <img
-              key={currentSlide.id}
-              src={currentSlide.image}
-              alt={currentSlide.title}
-              onError={() => setImageError(true)}
-              className="max-w-full max-h-full w-auto h-auto object-contain rounded-lg sm:rounded-xl md:rounded-2xl shadow-2xl border border-emerald-600/30 select-none pointer-events-none transition-opacity duration-200"
-              style={{ display: 'block' }}
-              loading="eager"
-              decoding="async"
-            />
-          ) : (
-            <div className="flex flex-col items-center justify-center p-8 bg-black/50 border border-emerald-700/50 rounded-2xl text-center max-w-sm">
-              <p className="text-sm text-red-300 mb-3">Không thể tải slide #{currentSlide.id}</p>
-              <button
-                onClick={() => {
-                  setImageError(false);
-                  goToSlide(currentIndex);
-                }}
-                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs"
-              >
-                <RotateCcw className="w-4 h-4" />
-                <span>Thử tải lại</span>
-              </button>
-            </div>
-          )}
-
-          {/* Right Click Area for Next Slide */}
-          <div
-            onClick={nextSlide}
-            title="Slide tiếp (→ hoặc Space)"
-            className="group absolute right-0 top-0 bottom-0 w-[20%] cursor-pointer flex items-center justify-end pr-2 sm:pr-4 transition-all duration-200 z-10"
-          >
-            <div className="p-2 sm:p-3 rounded-full bg-black/60 backdrop-blur-md text-emerald-300 border border-emerald-500/30 opacity-0 group-hover:opacity-100 transition-opacity shadow-lg">
-              <ChevronRight className="w-5 h-5 sm:w-6 sm:h-6" />
-            </div>
-          </div>
-        </div>
-      </main>
-
-      {/* BOTTOM CONTROLS & TIMELINE */}
-      <footer
-        className={`relative z-20 flex-shrink-0 px-3 md:px-6 py-2 bg-[#091a13]/90 backdrop-blur-md border-t border-[#2d6a4f]/40 flex flex-col gap-1.5 transition-all duration-300 ${
-          !isControlsVisible && isFullscreen ? 'opacity-0 translate-y-full pointer-events-none' : 'opacity-100 translate-y-0'
-        }`}
-      >
-        {/* Progress Bar with clickable segments */}
-        <div className="w-full flex items-center gap-1 h-2 cursor-pointer group py-0.5">
-          {slides.map((s, idx) => {
-            const isActive = idx === currentIndex;
-            const isPassed = idx < currentIndex;
-            return (
+        </main>
+      ) : (
+        /* CONTINUOUS SCROLL VIEW (FOR EASY READING ON PHONE) */
+        <main className="relative flex-1 min-h-0 w-full overflow-y-auto p-3 sm:p-6 space-y-6">
+          <div className="max-w-4xl mx-auto space-y-6">
+            {slides.map((s, idx) => (
               <div
                 key={s.id}
-                onClick={() => goToSlide(idx)}
-                title={`Slide ${idx + 1}: ${s.title}`}
-                className={`relative flex-1 h-1.5 md:h-2 rounded-full transition-all duration-200 ${
-                  isActive
-                    ? 'bg-emerald-400 ring-2 ring-emerald-300/60 scale-y-125'
-                    : isPassed
-                    ? 'bg-emerald-700 hover:bg-emerald-600'
-                    : 'bg-emerald-950/80 hover:bg-emerald-900/60'
-                }`}
-              />
-            );
-          })}
-        </div>
+                id={`slide-anchor-${s.id}`}
+                className="bg-[#0b2016] rounded-xl overflow-hidden border border-emerald-700/40 shadow-xl"
+              >
+                <div className="px-4 py-2 bg-[#081811] border-b border-emerald-800/40 flex items-center justify-between text-xs">
+                  <span className="font-bold text-emerald-400">Trang {idx + 1} / {slides.length}</span>
+                  <span className="text-slate-300 font-medium">{s.title}</span>
+                </div>
+                <img
+                  src={s.image}
+                  alt={s.title}
+                  className="w-full h-auto object-contain select-none"
+                  loading="lazy"
+                />
+                {s.text && (
+                  <div className="p-3 text-xs text-slate-300 border-t border-emerald-900/50 bg-[#07130e]/80 whitespace-pre-line">
+                    {s.text}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </main>
+      )}
 
-        {/* Footer controls row */}
-        <div className="flex items-center justify-between text-xs text-slate-300">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={prevSlide}
-              disabled={currentIndex === 0}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#0e2a1e] border border-emerald-700/40 text-emerald-300 hover:bg-emerald-900/60 active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all"
-            >
-              <ChevronLeft className="w-4 h-4" />
-              <span className="text-[11px] md:text-xs">Trước</span>
-            </button>
-            <button
-              onClick={nextSlide}
-              disabled={currentIndex === slides.length - 1}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#0e2a1e] border border-emerald-700/40 text-emerald-300 hover:bg-emerald-900/60 active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all"
-            >
-              <span className="text-[11px] md:text-xs">Sau</span>
-              <ChevronRight className="w-4 h-4" />
-            </button>
+      {/* BOTTOM CONTROLS & TIMELINE (IN SLIDE MODE) */}
+      {viewMode === 'slide' && (
+        <footer
+          className={`relative z-20 flex-shrink-0 px-3 md:px-6 py-2 bg-[#091a13]/95 backdrop-blur-md border-t border-[#2d6a4f]/40 flex flex-col gap-1.5 transition-all duration-300 ${
+            !isControlsVisible && isFullscreen ? 'opacity-0 translate-y-full pointer-events-none' : 'opacity-100 translate-y-0'
+          }`}
+        >
+          {/* Progress Bar with clickable segments */}
+          <div className="w-full flex items-center gap-1 h-2 cursor-pointer group py-0.5">
+            {slides.map((s, idx) => {
+              const isActive = idx === currentIndex;
+              const isPassed = idx < currentIndex;
+              return (
+                <div
+                  key={s.id}
+                  onClick={() => goToSlide(idx)}
+                  title={`Slide ${idx + 1}: ${s.title}`}
+                  className={`relative flex-1 h-1.5 md:h-2 rounded-full transition-all duration-200 ${
+                    isActive
+                      ? 'bg-emerald-400 ring-2 ring-emerald-300/60 scale-y-125'
+                      : isPassed
+                      ? 'bg-emerald-700 hover:bg-emerald-600'
+                      : 'bg-emerald-950/80 hover:bg-emerald-900/60'
+                  }`}
+                />
+              );
+            })}
           </div>
 
-          <div className="hidden sm:flex items-center gap-3 text-emerald-400/70 text-[11px] md:text-xs">
-            <span className="truncate max-w-[280px] text-slate-300 font-medium">
-              #{currentIndex + 1}. {currentSlide.title}
-            </span>
-          </div>
+          {/* Footer controls row */}
+          <div className="flex items-center justify-between text-xs text-slate-300">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={prevSlide}
+                disabled={currentIndex === 0}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#0e2a1e] border border-emerald-700/40 text-emerald-300 hover:bg-emerald-900/60 active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                <span className="text-[11px] md:text-xs">Trước</span>
+              </button>
+              <button
+                onClick={nextSlide}
+                disabled={currentIndex === slides.length - 1}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#0e2a1e] border border-emerald-700/40 text-emerald-300 hover:bg-emerald-900/60 active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all"
+              >
+                <span className="text-[11px] md:text-xs">Sau</span>
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowQrModal(true)}
-              className="text-emerald-400 hover:text-emerald-300 underline underline-offset-4 flex items-center gap-1 text-[11px] md:text-xs"
-            >
-              <Share2 className="w-3.5 h-3.5" />
-              <span>Chia sẻ QR</span>
-            </button>
+            <div className="hidden sm:flex items-center gap-3 text-emerald-400/70 text-[11px] md:text-xs">
+              <span className="truncate max-w-[280px] text-slate-300 font-medium">
+                #{currentIndex + 1}. {currentSlide.title}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowQrModal(true)}
+                className="text-emerald-400 hover:text-emerald-300 underline underline-offset-4 flex items-center gap-1 text-[11px] md:text-xs"
+              >
+                <Share2 className="w-3.5 h-3.5" />
+                <span>Chia sẻ QR</span>
+              </button>
+            </div>
           </div>
-        </div>
-      </footer>
+        </footer>
+      )}
 
       {/* QR CODE SHARING MODAL */}
       {showQrModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
-          <div className="relative w-full max-w-sm bg-[#0a1f16] border border-emerald-500/40 rounded-2xl p-5 sm:p-6 shadow-2xl flex flex-col items-center text-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="relative w-full max-w-sm bg-[#0a1f16] border border-emerald-500/40 rounded-2xl p-5 shadow-2xl flex flex-col items-center text-center">
             {/* Close button */}
             <button
               onClick={() => setShowQrModal(false)}
@@ -542,23 +574,18 @@ export default function App() {
             <h2 className="text-base font-bold text-white mb-1">
               Quét mã QR xem bài thuyết trình
             </h2>
-            <p className="text-[11px] text-emerald-300/80 mb-4 max-w-xs">
+            <p className="text-[11px] text-emerald-300/80 mb-3 max-w-xs">
               Mở camera điện thoại hoặc Zalo để quét và theo dõi bài giảng trực tiếp
             </p>
 
-            {/* QR Card */}
+            {/* Static QR Image Card */}
             <div className="p-3 bg-white rounded-xl shadow-lg border-4 border-emerald-500/30 mb-3 flex flex-col items-center justify-center">
-              <QRCodeSVG
-                id="qr-code-svg"
-                ref={qrSvgRef}
-                value={customQrUrl || currentUrl}
-                size={200}
-                level="M"
-                includeMargin={true}
-                fgColor="#091a13"
-                bgColor="#ffffff"
+              <img
+                src="/qr-code.png"
+                alt="QR Code"
+                className="w-48 h-48 object-contain"
               />
-              <span className="text-[10px] text-gray-600 mt-1 font-semibold uppercase tracking-wider">
+              <span className="text-[10px] text-gray-700 mt-1 font-semibold uppercase tracking-wider">
                 Nhóm 1 • Tế bào thực vật
               </span>
             </div>
@@ -567,10 +594,9 @@ export default function App() {
             <div className="w-full flex items-center gap-1.5 mb-3">
               <input
                 type="text"
-                value={customQrUrl}
-                onChange={(e) => setCustomQrUrl(e.target.value)}
-                placeholder="Nhập liên kết web app..."
-                className="flex-1 bg-black/40 border border-emerald-700/50 text-[11px] text-slate-200 rounded-lg px-2.5 py-2 outline-none focus:border-emerald-400"
+                readOnly
+                value={customQrUrl || currentUrl}
+                className="flex-1 bg-black/40 border border-emerald-700/50 text-[11px] text-slate-200 rounded-lg px-2.5 py-2 outline-none"
               />
               <button
                 onClick={handleCopyLink}
@@ -583,13 +609,14 @@ export default function App() {
 
             {/* Action buttons */}
             <div className="w-full flex gap-2">
-              <button
-                onClick={downloadQrCodePng}
+              <a
+                href="/qr-code.png"
+                download="QR-Te-Bao-Thuc-Vat-Nhom-1.png"
                 className="flex-1 flex items-center justify-center gap-1 py-2 px-3 rounded-lg bg-emerald-900/40 hover:bg-emerald-800/60 border border-emerald-600/40 text-emerald-200 text-xs font-medium transition-colors"
               >
                 <Download className="w-4 h-4" />
                 <span>Tải ảnh QR</span>
-              </button>
+              </a>
               <button
                 onClick={() => setShowQrModal(false)}
                 className="py-2 px-4 rounded-lg bg-emerald-700/30 hover:bg-emerald-700/50 text-slate-300 text-xs font-medium transition-colors"
@@ -621,7 +648,7 @@ export default function App() {
           {/* Grid Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 sm:gap-3 flex-1">
             {slides.map((s, idx) => {
-              const isSelected = idx === currentIndex;
+              const isSelected = idx === currentIndex && viewMode === 'slide';
               return (
                 <div
                   key={s.id}
@@ -691,9 +718,11 @@ export default function App() {
           <div className="pt-3 border-t border-emerald-800/40 flex gap-2">
             <button
               onClick={() => {
-                navigator.clipboard.writeText(currentSlide.text);
-                setCopied(true);
-                setTimeout(() => setCopied(false), 2000);
+                if (navigator.clipboard) {
+                  navigator.clipboard.writeText(currentSlide.text);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                }
               }}
               className="flex-1 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium flex items-center justify-center gap-1.5 transition-colors"
             >
@@ -733,6 +762,12 @@ export default function App() {
                 </span>
               </div>
               <div className="flex justify-between items-center py-1 border-b border-emerald-900/40">
+                <span className="text-slate-300">Đổi Chế độ Cuộn/Trình chiếu</span>
+                <span className="font-mono bg-black/50 px-2 py-0.5 rounded border border-emerald-800 text-emerald-300">
+                  M
+                </span>
+              </div>
+              <div className="flex justify-between items-center py-1 border-b border-emerald-900/40">
                 <span className="text-slate-300">Toàn màn hình</span>
                 <span className="font-mono bg-black/50 px-2 py-0.5 rounded border border-emerald-800 text-emerald-300">
                   F
@@ -748,12 +783,6 @@ export default function App() {
                 <span className="text-slate-300">Xem lưới slide</span>
                 <span className="font-mono bg-black/50 px-2 py-0.5 rounded border border-emerald-800 text-emerald-300">
                   G
-                </span>
-              </div>
-              <div className="flex justify-between items-center py-1 border-b border-emerald-900/40">
-                <span className="text-slate-300">Nội dung bài giảng</span>
-                <span className="font-mono bg-black/50 px-2 py-0.5 rounded border border-emerald-800 text-emerald-300">
-                  N
                 </span>
               </div>
             </div>
