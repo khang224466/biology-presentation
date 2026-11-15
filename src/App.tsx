@@ -17,7 +17,8 @@ import {
   X,
   Share2,
   Sparkles,
-  HelpCircle
+  HelpCircle,
+  RotateCcw
 } from 'lucide-react';
 import slidesData from './slidesData.json';
 
@@ -41,25 +42,27 @@ export default function App() {
   const [showHelp, setShowHelp] = useState<boolean>(false);
   const [isAutoPlay, setIsAutoPlay] = useState<boolean>(false);
   const [copied, setCopied] = useState<boolean>(false);
-  const [currentUrl, setCurrentUrl] = useState<string>('');
-  const [customQrUrl, setCustomQrUrl] = useState<string>('');
+  const [currentUrl, setCurrentUrl] = useState<string>('https://biology-presentation-beta.vercel.app');
+  const [customQrUrl, setCustomQrUrl] = useState<string>('https://biology-presentation-beta.vercel.app');
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
+  const [touchStartY, setTouchStartY] = useState<number | null>(null);
   const [isControlsVisible, setIsControlsVisible] = useState<boolean>(true);
+  const [imageError, setImageError] = useState<boolean>(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const controlsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const qrSvgRef = useRef<SVGSVGElement | null>(null);
 
-  // Initialize URL for QR code
+  // Initialize live URL for QR code
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const href = window.location.href.split('#')[0];
-      setCurrentUrl(href);
-      setCustomQrUrl(href);
+    if (typeof window !== 'undefined' && window.location.href) {
+      const cleanUrl = window.location.origin + window.location.pathname;
+      setCurrentUrl(cleanUrl);
+      setCustomQrUrl(cleanUrl);
     }
   }, []);
 
-  // Preload neighboring slides
+  // Preload neighboring slides for instant switching
   useEffect(() => {
     const nextIdx = (currentIndex + 1) % slides.length;
     const prevIdx = (currentIndex - 1 + slides.length) % slides.length;
@@ -74,8 +77,8 @@ export default function App() {
     if (currentIndex === 16) {
       try {
         confetti({
-          particleCount: 80,
-          spread: 70,
+          particleCount: 90,
+          spread: 80,
           origin: { y: 0.6 },
           colors: ['#52b788', '#74c69d', '#95d5b2', '#b7e4c7', '#d8f3dc']
         });
@@ -87,15 +90,18 @@ export default function App() {
 
   const goToSlide = useCallback((index: number) => {
     if (index >= 0 && index < slides.length) {
+      setImageError(false);
       setCurrentIndex(index);
     }
   }, [slides.length]);
 
   const nextSlide = useCallback(() => {
+    setImageError(false);
     setCurrentIndex((prev) => (prev < slides.length - 1 ? prev + 1 : prev));
   }, [slides.length]);
 
   const prevSlide = useCallback(() => {
+    setImageError(false);
     setCurrentIndex((prev) => (prev > 0 ? prev - 1 : prev));
   }, []);
 
@@ -183,11 +189,13 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [nextSlide, prevSlide, goToSlide, slides.length, showQrModal, showNotes, showThumbnails, showHelp]);
 
-  // Fullscreen toggle
+  // Fullscreen toggle with iOS fallback
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch(() => {});
-      setIsFullscreen(true);
+      if (document.documentElement.requestFullscreen) {
+        document.documentElement.requestFullscreen().catch(() => {});
+        setIsFullscreen(true);
+      }
     } else {
       if (document.exitFullscreen) {
         document.exitFullscreen().catch(() => {});
@@ -204,35 +212,41 @@ export default function App() {
     return () => document.removeEventListener('fullscreenchange', onFsChange);
   }, []);
 
-  // Inactivity fade for controls in presentation mode
-  const handleMouseMove = () => {
+  // Controls visibility
+  const wakeControls = () => {
     setIsControlsVisible(true);
     if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
     controlsTimeoutRef.current = setTimeout(() => {
       if (isFullscreen) {
         setIsControlsVisible(false);
       }
-    }, 3500);
+    }, 4000);
   };
 
   // Touch handlers for mobile swipe
   const handleTouchStart = (e: React.TouchEvent) => {
+    wakeControls();
     setTouchStartX(e.touches[0].clientX);
+    setTouchStartY(e.touches[0].clientY);
   };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
-    if (touchStartX === null) return;
+    if (touchStartX === null || touchStartY === null) return;
     const touchEndX = e.changedTouches[0].clientX;
-    const diff = touchStartX - touchEndX;
+    const touchEndY = e.changedTouches[0].clientY;
+    const diffX = touchStartX - touchEndX;
+    const diffY = touchStartY - touchEndY;
 
-    if (Math.abs(diff) > 50) {
-      if (diff > 0) {
+    // Horizontal swipe if swipe distance in X is greater than Y
+    if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 40) {
+      if (diffX > 0) {
         nextSlide();
       } else {
         prevSlide();
       }
     }
     setTouchStartX(null);
+    setTouchStartY(null);
   };
 
   const handleCopyLink = () => {
@@ -258,7 +272,7 @@ export default function App() {
         ctx.fillRect(0, 0, 600, 600);
         ctx.drawImage(img, 40, 40, 520, 520);
         const a = document.createElement('a');
-        a.download = `QR-Te-Bao-Thuc-Vat-Nhom-1.png`;
+        a.download = 'QR-Te-Bao-Thuc-Vat-Nhom-1.png';
         a.href = canvas.toDataURL('image/png');
         a.click();
       }
@@ -271,58 +285,56 @@ export default function App() {
   return (
     <div
       ref={containerRef}
-      onMouseMove={handleMouseMove}
+      onMouseMove={wakeControls}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
-      className="relative w-screen h-screen bg-[#07130e] text-slate-100 flex flex-col justify-between overflow-hidden select-none font-sans"
+      className="relative w-full h-[100dvh] min-h-[100dvh] bg-[#07130e] text-slate-100 flex flex-col justify-between overflow-hidden select-none font-sans"
     >
       {/* BACKGROUND GLOW */}
-      <div className="absolute inset-0 pointer-events-none opacity-20">
-        <div className="absolute top-[-10%] left-[20%] w-[500px] h-[500px] rounded-full bg-[#2d6a4f] blur-[140px]" />
-        <div className="absolute bottom-[-10%] right-[10%] w-[600px] h-[600px] rounded-full bg-[#1b4332] blur-[160px]" />
+      <div className="absolute inset-0 pointer-events-none opacity-25">
+        <div className="absolute top-[-10%] left-[20%] w-[450px] h-[450px] rounded-full bg-[#2d6a4f] blur-[130px]" />
+        <div className="absolute bottom-[-10%] right-[10%] w-[550px] h-[550px] rounded-full bg-[#1b4332] blur-[150px]" />
       </div>
 
       {/* TOP NAVIGATION BAR */}
       <header
-        className={`relative z-20 flex items-center justify-between px-3 md:px-6 py-2.5 bg-[#091a13]/85 backdrop-blur-md border-b border-[#2d6a4f]/40 transition-all duration-300 ${
+        className={`relative z-20 flex-shrink-0 flex items-center justify-between px-3 md:px-6 py-2 bg-[#091a13]/90 backdrop-blur-md border-b border-[#2d6a4f]/40 transition-all duration-300 ${
           !isControlsVisible && isFullscreen ? 'opacity-0 -translate-y-full pointer-events-none' : 'opacity-100 translate-y-0'
         }`}
       >
         {/* Left: Branding & current title */}
-        <div className="flex items-center gap-2.5 md:gap-3.5">
-          <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-600/30 border border-emerald-500/40 text-emerald-400">
-            <Sparkles className="w-4 h-4 animate-pulse" />
+        <div className="flex items-center gap-2 md:gap-3">
+          <div className="flex items-center justify-center w-7 h-7 md:w-8 md:h-8 rounded-lg bg-emerald-600/30 border border-emerald-500/40 text-emerald-400">
+            <Sparkles className="w-3.5 h-3.5 md:w-4 md:h-4 animate-pulse" />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold uppercase tracking-wider text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/40">
-                Nhóm 1 • Sinh Học
-              </span>
-              <span className="hidden sm:inline-block text-xs text-emerald-200/60">|</span>
-              <h1 className="hidden sm:inline-block text-sm font-medium text-slate-200 truncate max-w-[220px] md:max-w-md">
-                {currentSlide.title}
-              </h1>
-            </div>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] md:text-xs font-semibold uppercase tracking-wider text-emerald-400 bg-emerald-950/70 px-2 py-0.5 rounded border border-emerald-800/40">
+              Nhóm 1
+            </span>
+            <span className="hidden sm:inline-block text-xs text-emerald-300/40">|</span>
+            <h1 className="hidden sm:inline-block text-xs md:text-sm font-medium text-slate-200 truncate max-w-[200px] md:max-w-md">
+              {currentSlide.title}
+            </h1>
           </div>
         </div>
 
-        {/* Center: Slide indicator */}
-        <div className="flex items-center gap-1.5 bg-[#0e2a1e]/80 border border-emerald-600/30 px-3 py-1 rounded-full text-xs font-medium text-emerald-300">
+        {/* Center: Slide counter */}
+        <div className="flex items-center gap-1 bg-[#0e2a1e]/90 border border-emerald-600/30 px-2.5 py-1 rounded-full text-xs font-medium text-emerald-300">
           <span className="text-emerald-400 font-bold">{String(currentIndex + 1).padStart(2, '0')}</span>
-          <span className="text-emerald-600">/</span>
+          <span className="text-emerald-600/80">/</span>
           <span className="text-slate-400">{String(slides.length).padStart(2, '0')}</span>
         </div>
 
         {/* Right: Action Buttons */}
         <div className="flex items-center gap-1 md:gap-2">
-          {/* QR Button (Prominent) */}
+          {/* QR Button (Highlighted) */}
           <button
             onClick={() => setShowQrModal(true)}
             title="Quét mã QR để mở trên điện thoại (Q)"
-            className="flex items-center gap-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-medium px-2.5 md:px-3.5 py-1.5 rounded-lg shadow-lg shadow-emerald-900/40 transition-all transform active:scale-95"
+            className="flex items-center gap-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-medium px-2.5 py-1.5 rounded-lg shadow-md shadow-emerald-950/40 transition-all active:scale-95"
           >
-            <QrCode className="w-4 h-4" />
-            <span className="hidden sm:inline">Quét QR</span>
+            <QrCode className="w-3.5 h-3.5 md:w-4 md:h-4" />
+            <span className="text-[11px] md:text-xs">Mã QR</span>
           </button>
 
           {/* Download Original PDF */}
@@ -330,9 +342,9 @@ export default function App() {
             href="/slides/te-bao-thuc-vat-nhom-1.pdf"
             download="te-bao-thuc-vat-nhom-1.pdf"
             title="Tải bài thuyết trình PDF gốc"
-            className="p-1.5 md:px-2.5 md:py-1.5 text-xs rounded-lg bg-emerald-900/30 hover:bg-emerald-800/50 text-emerald-300 border border-emerald-700/40 flex items-center gap-1 transition-colors"
+            className="hidden sm:flex items-center gap-1 p-1.5 md:px-2.5 md:py-1.5 text-xs rounded-lg bg-emerald-900/30 hover:bg-emerald-800/50 text-emerald-300 border border-emerald-700/40 transition-colors"
           >
-            <Download className="w-4 h-4" />
+            <Download className="w-3.5 h-3.5 md:w-4 md:h-4" />
             <span className="hidden md:inline">Tải PDF</span>
           </a>
 
@@ -362,7 +374,7 @@ export default function App() {
           <button
             onClick={() => setIsAutoPlay((prev) => !prev)}
             title={isAutoPlay ? 'Tạm dừng tự động chạy (A)' : 'Tự động chạy bài thuyết trình (A)'}
-            className={`p-1.5 rounded-lg text-emerald-300 hover:bg-emerald-900/40 transition-colors ${
+            className={`hidden sm:flex p-1.5 rounded-lg text-emerald-300 hover:bg-emerald-900/40 transition-colors ${
               isAutoPlay ? 'bg-emerald-500 text-black' : ''
             }`}
           >
@@ -382,44 +394,62 @@ export default function App() {
           <button
             onClick={() => setShowHelp(true)}
             title="Phím tắt & Hướng dẫn (?)"
-            className="hidden sm:block p-1.5 rounded-lg text-emerald-400/80 hover:bg-emerald-900/40 transition-colors"
+            className="hidden md:block p-1.5 rounded-lg text-emerald-400/80 hover:bg-emerald-900/40 transition-colors"
           >
             <HelpCircle className="w-4 h-4" />
           </button>
         </div>
       </header>
 
-      {/* MAIN SLIDE VIEW AREA */}
-      <main className="relative flex-1 flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-hidden">
-        {/* Slide Canvas 16:9 */}
-        <div className="relative w-full h-full max-w-[177.78vh] max-h-[56.25vw] aspect-video flex items-center justify-center bg-black/40 rounded-xl md:rounded-2xl shadow-2xl overflow-hidden border border-[#2d6a4f]/30">
-          <img
-            key={currentSlide.id}
-            src={currentSlide.image}
-            alt={currentSlide.title}
-            className="w-full h-full object-contain transition-opacity duration-200 select-none pointer-events-none"
-            loading="eager"
-            decoding="async"
-          />
-
+      {/* MAIN SLIDE VIEW AREA - BULLETPROOF SCALING */}
+      <main className="relative flex-1 min-h-0 w-full flex items-center justify-center p-2 sm:p-4 md:p-6 overflow-hidden">
+        <div className="relative w-full h-full max-w-[1920px] flex items-center justify-center">
           {/* Left Click Area for Prev Slide */}
           <div
             onClick={prevSlide}
             title="Slide trước (←)"
-            className="group absolute left-0 top-0 bottom-0 w-[15%] cursor-pointer flex items-center justify-start pl-2 sm:pl-4 transition-all duration-200 z-10"
+            className="group absolute left-0 top-0 bottom-0 w-[20%] cursor-pointer flex items-center justify-start pl-2 sm:pl-4 transition-all duration-200 z-10"
           >
-            <div className="p-2 sm:p-3 rounded-full bg-black/50 backdrop-blur-md text-emerald-300 border border-emerald-500/30 opacity-0 group-hover:opacity-100 transition-opacity shadow-lg">
+            <div className="p-2 sm:p-3 rounded-full bg-black/60 backdrop-blur-md text-emerald-300 border border-emerald-500/30 opacity-0 group-hover:opacity-100 transition-opacity shadow-lg">
               <ChevronLeft className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
           </div>
+
+          {/* Slide Image with Native 16:9 Aspect Ratio Preservation */}
+          {!imageError ? (
+            <img
+              key={currentSlide.id}
+              src={currentSlide.image}
+              alt={currentSlide.title}
+              onError={() => setImageError(true)}
+              className="max-w-full max-h-full w-auto h-auto object-contain rounded-lg sm:rounded-xl md:rounded-2xl shadow-2xl border border-emerald-600/30 select-none pointer-events-none transition-opacity duration-200"
+              style={{ display: 'block' }}
+              loading="eager"
+              decoding="async"
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center p-8 bg-black/50 border border-emerald-700/50 rounded-2xl text-center max-w-sm">
+              <p className="text-sm text-red-300 mb-3">Không thể tải slide #{currentSlide.id}</p>
+              <button
+                onClick={() => {
+                  setImageError(false);
+                  goToSlide(currentIndex);
+                }}
+                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs"
+              >
+                <RotateCcw className="w-4 h-4" />
+                <span>Thử tải lại</span>
+              </button>
+            </div>
+          )}
 
           {/* Right Click Area for Next Slide */}
           <div
             onClick={nextSlide}
             title="Slide tiếp (→ hoặc Space)"
-            className="group absolute right-0 top-0 bottom-0 w-[15%] cursor-pointer flex items-center justify-end pr-2 sm:pr-4 transition-all duration-200 z-10"
+            className="group absolute right-0 top-0 bottom-0 w-[20%] cursor-pointer flex items-center justify-end pr-2 sm:pr-4 transition-all duration-200 z-10"
           >
-            <div className="p-2 sm:p-3 rounded-full bg-black/50 backdrop-blur-md text-emerald-300 border border-emerald-500/30 opacity-0 group-hover:opacity-100 transition-opacity shadow-lg">
+            <div className="p-2 sm:p-3 rounded-full bg-black/60 backdrop-blur-md text-emerald-300 border border-emerald-500/30 opacity-0 group-hover:opacity-100 transition-opacity shadow-lg">
               <ChevronRight className="w-5 h-5 sm:w-6 sm:h-6" />
             </div>
           </div>
@@ -428,12 +458,12 @@ export default function App() {
 
       {/* BOTTOM CONTROLS & TIMELINE */}
       <footer
-        className={`relative z-20 px-3 md:px-6 py-2.5 bg-[#091a13]/85 backdrop-blur-md border-t border-[#2d6a4f]/40 flex flex-col gap-2 transition-all duration-300 ${
+        className={`relative z-20 flex-shrink-0 px-3 md:px-6 py-2 bg-[#091a13]/90 backdrop-blur-md border-t border-[#2d6a4f]/40 flex flex-col gap-1.5 transition-all duration-300 ${
           !isControlsVisible && isFullscreen ? 'opacity-0 translate-y-full pointer-events-none' : 'opacity-100 translate-y-0'
         }`}
       >
         {/* Progress Bar with clickable segments */}
-        <div className="w-full flex items-center gap-1 h-2 cursor-pointer group">
+        <div className="w-full flex items-center gap-1 h-2 cursor-pointer group py-0.5">
           {slides.map((s, idx) => {
             const isActive = idx === currentIndex;
             const isPassed = idx < currentIndex;
@@ -460,34 +490,34 @@ export default function App() {
             <button
               onClick={prevSlide}
               disabled={currentIndex === 0}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#0e2a1e] border border-emerald-700/40 text-emerald-300 hover:bg-emerald-900/60 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#0e2a1e] border border-emerald-700/40 text-emerald-300 hover:bg-emerald-900/60 active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all"
             >
               <ChevronLeft className="w-4 h-4" />
-              <span>Trước</span>
+              <span className="text-[11px] md:text-xs">Trước</span>
             </button>
             <button
               onClick={nextSlide}
               disabled={currentIndex === slides.length - 1}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#0e2a1e] border border-emerald-700/40 text-emerald-300 hover:bg-emerald-900/60 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#0e2a1e] border border-emerald-700/40 text-emerald-300 hover:bg-emerald-900/60 active:scale-95 disabled:opacity-30 disabled:pointer-events-none transition-all"
             >
-              <span>Sau</span>
+              <span className="text-[11px] md:text-xs">Sau</span>
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>
 
-          <div className="hidden sm:flex items-center gap-3 text-emerald-400/70">
-            <span>Dùng phím mũi tên ◄ ► hoặc Space để chuyển slide</span>
-            <span>•</span>
-            <span>Nhấn <kbd className="px-1.5 py-0.5 bg-black/40 rounded border border-emerald-800 text-white font-mono text-[10px]">F</kbd> toàn màn hình</span>
+          <div className="hidden sm:flex items-center gap-3 text-emerald-400/70 text-[11px] md:text-xs">
+            <span className="truncate max-w-[280px] text-slate-300 font-medium">
+              #{currentIndex + 1}. {currentSlide.title}
+            </span>
           </div>
 
           <div className="flex items-center gap-2">
             <button
               onClick={() => setShowQrModal(true)}
-              className="text-emerald-400 hover:text-emerald-300 underline underline-offset-4 flex items-center gap-1"
+              className="text-emerald-400 hover:text-emerald-300 underline underline-offset-4 flex items-center gap-1 text-[11px] md:text-xs"
             >
               <Share2 className="w-3.5 h-3.5" />
-              <span>Chia sẻ mã QR</span>
+              <span>Chia sẻ QR</span>
             </button>
           </div>
         </div>
@@ -496,7 +526,7 @@ export default function App() {
       {/* QR CODE SHARING MODAL */}
       {showQrModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
-          <div className="relative w-full max-w-md bg-[#0a1f16] border border-emerald-500/40 rounded-2xl p-6 shadow-2xl flex flex-col items-center text-center">
+          <div className="relative w-full max-w-sm bg-[#0a1f16] border border-emerald-500/40 rounded-2xl p-5 sm:p-6 shadow-2xl flex flex-col items-center text-center">
             {/* Close button */}
             <button
               onClick={() => setShowQrModal(false)}
@@ -506,59 +536,59 @@ export default function App() {
             </button>
 
             {/* Header */}
-            <div className="flex items-center justify-center w-12 h-12 rounded-full bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 mb-3">
-              <QrCode className="w-6 h-6" />
+            <div className="flex items-center justify-center w-10 h-10 rounded-full bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 mb-2">
+              <QrCode className="w-5 h-5" />
             </div>
-            <h2 className="text-lg font-bold text-white mb-1">
-              Quét mã QR để xem bài thuyết trình
+            <h2 className="text-base font-bold text-white mb-1">
+              Quét mã QR xem bài thuyết trình
             </h2>
-            <p className="text-xs text-emerald-300/80 mb-5 max-w-xs">
-              Mở camera điện thoại hoặc Zalo để quét và theo dõi bài thuyết trình trên máy của bạn
+            <p className="text-[11px] text-emerald-300/80 mb-4 max-w-xs">
+              Mở camera điện thoại hoặc Zalo để quét và theo dõi bài giảng trực tiếp
             </p>
 
             {/* QR Card */}
-            <div className="p-4 bg-white rounded-xl shadow-lg border-4 border-emerald-500/30 mb-4 flex flex-col items-center justify-center">
+            <div className="p-3 bg-white rounded-xl shadow-lg border-4 border-emerald-500/30 mb-3 flex flex-col items-center justify-center">
               <QRCodeSVG
                 id="qr-code-svg"
                 ref={qrSvgRef}
-                value={customQrUrl || currentUrl || 'https://te-bao-thuc-vat.vercel.app'}
-                size={220}
-                level="H"
+                value={customQrUrl || currentUrl}
+                size={200}
+                level="M"
                 includeMargin={true}
                 fgColor="#091a13"
                 bgColor="#ffffff"
               />
-              <span className="text-[10px] text-gray-500 mt-1 font-semibold uppercase tracking-wider">
+              <span className="text-[10px] text-gray-600 mt-1 font-semibold uppercase tracking-wider">
                 Nhóm 1 • Tế bào thực vật
               </span>
             </div>
 
             {/* URL input field */}
-            <div className="w-full flex items-center gap-1.5 mb-4">
+            <div className="w-full flex items-center gap-1.5 mb-3">
               <input
                 type="text"
                 value={customQrUrl}
                 onChange={(e) => setCustomQrUrl(e.target.value)}
                 placeholder="Nhập liên kết web app..."
-                className="flex-1 bg-black/40 border border-emerald-700/50 text-xs text-slate-200 rounded-lg px-3 py-2 outline-none focus:border-emerald-400"
+                className="flex-1 bg-black/40 border border-emerald-700/50 text-[11px] text-slate-200 rounded-lg px-2.5 py-2 outline-none focus:border-emerald-400"
               />
               <button
                 onClick={handleCopyLink}
-                className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-2 rounded-lg font-medium transition-colors"
+                className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] px-3 py-2 rounded-lg font-medium transition-colors"
               >
-                {copied ? <Check className="w-4 h-4 text-emerald-200" /> : <Copy className="w-4 h-4" />}
+                {copied ? <Check className="w-3.5 h-3.5 text-emerald-200" /> : <Copy className="w-3.5 h-3.5" />}
                 <span>{copied ? 'Đã chép' : 'Chép'}</span>
               </button>
             </div>
 
-            {/* Download QR PNG Button */}
+            {/* Action buttons */}
             <div className="w-full flex gap-2">
               <button
                 onClick={downloadQrCodePng}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-emerald-900/40 hover:bg-emerald-800/60 border border-emerald-600/40 text-emerald-200 text-xs font-medium transition-colors"
+                className="flex-1 flex items-center justify-center gap-1 py-2 px-3 rounded-lg bg-emerald-900/40 hover:bg-emerald-800/60 border border-emerald-600/40 text-emerald-200 text-xs font-medium transition-colors"
               >
                 <Download className="w-4 h-4" />
-                <span>Tải ảnh QR (PNG)</span>
+                <span>Tải ảnh QR</span>
               </button>
               <button
                 onClick={() => setShowQrModal(false)}
@@ -573,23 +603,23 @@ export default function App() {
 
       {/* THUMBNAILS GRID DRAWER / MODAL */}
       {showThumbnails && (
-        <div className="fixed inset-0 z-50 flex flex-col bg-[#07130e]/95 backdrop-blur-xl animate-in fade-in duration-200 p-4 md:p-8 overflow-y-auto">
+        <div className="fixed inset-0 z-50 flex flex-col bg-[#07130e]/95 backdrop-blur-xl animate-in fade-in duration-200 p-4 md:p-6 overflow-y-auto">
           {/* Header */}
-          <div className="flex items-center justify-between pb-4 border-b border-emerald-800/40 mb-6">
+          <div className="flex items-center justify-between pb-3 border-b border-emerald-800/40 mb-4">
             <div className="flex items-center gap-2">
               <Grid className="w-5 h-5 text-emerald-400" />
-              <h2 className="text-base font-bold text-white">Danh sách 18 slide thuyết trình</h2>
+              <h2 className="text-sm md:text-base font-bold text-white">Danh sách 18 slide thuyết trình</h2>
             </div>
             <button
               onClick={() => setShowThumbnails(false)}
-              className="p-2 rounded-full text-slate-400 hover:text-white hover:bg-emerald-900/40 transition-colors"
+              className="p-1.5 rounded-full text-slate-400 hover:text-white hover:bg-emerald-900/40 transition-colors"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
 
           {/* Grid Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 md:gap-4 flex-1">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 sm:gap-3 flex-1">
             {slides.map((s, idx) => {
               const isSelected = idx === currentIndex;
               return (
@@ -612,12 +642,12 @@ export default function App() {
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                       loading="lazy"
                     />
-                    <div className="absolute top-1.5 left-1.5 bg-black/70 backdrop-blur-sm text-[10px] font-bold text-emerald-300 px-1.5 py-0.5 rounded">
+                    <div className="absolute top-1 left-1 bg-black/70 backdrop-blur-sm text-[10px] font-bold text-emerald-300 px-1.5 py-0.5 rounded">
                       #{idx + 1}
                     </div>
                   </div>
                   <div className="p-2 text-left">
-                    <h3 className="text-xs font-medium text-slate-200 line-clamp-2 leading-tight">
+                    <h3 className="text-[11px] font-medium text-slate-200 line-clamp-2 leading-tight">
                       {s.title}
                     </h3>
                   </div>
@@ -630,10 +660,10 @@ export default function App() {
 
       {/* NOTES / TRANSCRIPT DRAWER */}
       {showNotes && (
-        <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-96 bg-[#091a13]/95 backdrop-blur-xl border-l border-emerald-700/40 p-6 flex flex-col shadow-2xl animate-in slide-in-from-right duration-200">
-          <div className="flex items-center justify-between pb-4 border-b border-emerald-800/40 mb-4">
+        <div className="fixed inset-y-0 right-0 z-50 w-full sm:w-96 bg-[#091a13]/95 backdrop-blur-xl border-l border-emerald-700/40 p-5 flex flex-col shadow-2xl animate-in slide-in-from-right duration-200">
+          <div className="flex items-center justify-between pb-3 border-b border-emerald-800/40 mb-3">
             <div className="flex items-center gap-2">
-              <FileText className="w-5 h-5 text-emerald-400" />
+              <FileText className="w-4 h-4 text-emerald-400" />
               <h2 className="text-sm font-bold text-white">Nội dung Slide {currentIndex + 1}</h2>
             </div>
             <button
@@ -644,10 +674,10 @@ export default function App() {
             </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto space-y-4 pr-1 text-xs leading-relaxed text-slate-200">
+          <div className="flex-1 overflow-y-auto space-y-3 pr-1 text-xs leading-relaxed text-slate-200">
             <div>
               <span className="text-[10px] uppercase font-bold text-emerald-400 tracking-wider">Tiêu đề:</span>
-              <p className="text-sm font-semibold text-white mt-0.5">{currentSlide.title}</p>
+              <p className="text-xs font-semibold text-white mt-0.5">{currentSlide.title}</p>
             </div>
 
             <div>
@@ -658,7 +688,7 @@ export default function App() {
             </div>
           </div>
 
-          <div className="pt-4 border-t border-emerald-800/40 flex gap-2">
+          <div className="pt-3 border-t border-emerald-800/40 flex gap-2">
             <button
               onClick={() => {
                 navigator.clipboard.writeText(currentSlide.text);
@@ -677,29 +707,29 @@ export default function App() {
       {/* KEYBOARD SHORTCUTS HELP MODAL */}
       {showHelp && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
-          <div className="relative w-full max-w-sm bg-[#0a1f16] border border-emerald-500/40 rounded-2xl p-6 shadow-2xl">
+          <div className="relative w-full max-w-sm bg-[#0a1f16] border border-emerald-500/40 rounded-2xl p-5 shadow-2xl">
             <button
               onClick={() => setShowHelp(false)}
               className="absolute top-4 right-4 p-1.5 rounded-full text-slate-400 hover:text-white hover:bg-emerald-900/50 transition-colors"
             >
               <X className="w-5 h-5" />
             </button>
-            <h2 className="text-base font-bold text-white mb-4 flex items-center gap-2">
-              <HelpCircle className="w-5 h-5 text-emerald-400" />
+            <h2 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
+              <HelpCircle className="w-4 h-4 text-emerald-400" />
               <span>Phím tắt trình chiếu</span>
             </h2>
 
-            <div className="space-y-2.5 text-xs">
+            <div className="space-y-2 text-xs">
               <div className="flex justify-between items-center py-1 border-b border-emerald-900/40">
                 <span className="text-slate-300">Slide tiếp theo</span>
                 <span className="font-mono bg-black/50 px-2 py-0.5 rounded border border-emerald-800 text-emerald-300">
-                  → / Space / PageDown
+                  → / Space
                 </span>
               </div>
               <div className="flex justify-between items-center py-1 border-b border-emerald-900/40">
                 <span className="text-slate-300">Slide trước đó</span>
                 <span className="font-mono bg-black/50 px-2 py-0.5 rounded border border-emerald-800 text-emerald-300">
-                  ← / PageUp
+                  ←
                 </span>
               </div>
               <div className="flex justify-between items-center py-1 border-b border-emerald-900/40">
@@ -721,22 +751,16 @@ export default function App() {
                 </span>
               </div>
               <div className="flex justify-between items-center py-1 border-b border-emerald-900/40">
-                <span className="text-slate-300">Xem nội dung bài giảng</span>
+                <span className="text-slate-300">Nội dung bài giảng</span>
                 <span className="font-mono bg-black/50 px-2 py-0.5 rounded border border-emerald-800 text-emerald-300">
                   N
-                </span>
-              </div>
-              <div className="flex justify-between items-center py-1">
-                <span className="text-slate-300">Đóng cửa sổ phụ</span>
-                <span className="font-mono bg-black/50 px-2 py-0.5 rounded border border-emerald-800 text-emerald-300">
-                  ESC
                 </span>
               </div>
             </div>
 
             <button
               onClick={() => setShowHelp(false)}
-              className="w-full mt-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium transition-colors"
+              className="w-full mt-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium transition-colors"
             >
               Đã hiểu
             </button>
